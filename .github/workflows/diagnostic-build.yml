@@ -1,4 +1,4 @@
-name: Build Dropscotch diagnostic
+name: Build Dropscotch plugins
 on:
   workflow_dispatch:
   push:
@@ -32,5 +32,26 @@ jobs:
         with:
           name: DropscotchDiagnostics-Windows-x64
           path: package/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Package tested solver update
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path solver-package/datafilePlugins -Force | Out-Null
+          Copy-Item -LiteralPath build-diagnostic/Release/DropscotchSolver.dll -Destination solver-package/datafilePlugins/
+          Copy-Item -LiteralPath diagnostics/SOLVER_README.md -Destination solver-package/README.md
+          Get-FileHash -Algorithm SHA256 solver-package/datafilePlugins/DropscotchSolver.dll | Select-Object @{Name='File';Expression={Split-Path $_.Path -Leaf}},Hash | ConvertTo-Json | Set-Content solver-package/manifest.json
+          Compress-Archive -Path solver-package/* -DestinationPath DropscotchSolver-Update.zip
+          Write-Output ('SOLVER_PACKAGE_SHA256=' + (Get-FileHash -Algorithm SHA256 DropscotchSolver-Update.zip).Hash)
+          $encoded = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path (Get-Location) 'DropscotchSolver-Update.zip')))
+          Write-Output 'SOLVER_PACKAGE_BASE64_BEGIN'
+          for ($i = 0; $i -lt $encoded.Length; $i += 4000) { Write-Output ($encoded.Substring($i, [Math]::Min(4000, $encoded.Length - $i))) }
+          Write-Output 'SOLVER_PACKAGE_BASE64_END'
+      - name: Upload tested solver
+        uses: actions/upload-artifact@v4
+        with:
+          name: DropscotchSolver-Windows-x64
+          path: solver-package/
           if-no-files-found: error
           retention-days: 14
