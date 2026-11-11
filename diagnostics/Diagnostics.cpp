@@ -150,9 +150,12 @@ private:
             });
             flushRequested_.store(false);
             waitLock.unlock();
+            // Stop may arrive while an earlier snapshot is being written.
+            // Only exit after taking a snapshot that began AFTER Stop.
+            const bool finalSnapshot = stopping_.load();
             try { Snapshot(); healthy.store(true); }
             catch (...) { healthy.store(false); }
-            if (stopping_.load()) break;
+            if (finalSnapshot) break;
         }
     }
 
@@ -179,6 +182,7 @@ PluginImGuiAPI* g_imgui = nullptr;
 UnregisterImGuiPanelFn g_unregisterPanel = nullptr;
 int g_panel = 0;
 std::atomic<bool> g_initFailed{false};
+std::atomic<unsigned long long> g_captureSequence{0};
 
 PluginReturnData Capture(unsigned table, PluginExecuteParams* params) {
     std::shared_lock lock(g_lifecycle);
@@ -236,7 +240,9 @@ void Init(PluginInitParams* params) {
             const DWORD exeLength = GetModuleFileNameW(nullptr, name.data(), DWORD(name.size()));
             if (exeLength && exeLength < name.size())
                 root = fs::path(std::wstring(name.data(), exeLength)).parent_path() / L"datafilePlugins";
-            g_recorder = new Recorder(root / L"DropscotchDiagnosticsLogs" / stamp);
+            const auto captureName = std::wstring(stamp) + L"-" +
+                std::to_wstring(g_captureSequence.fetch_add(1));
+            g_recorder = new Recorder(root / L"DropscotchDiagnosticsLogs" / captureName);
             g_initFailed.store(false);
         } catch (...) { g_initFailed.store(true); }
         if (params) {
