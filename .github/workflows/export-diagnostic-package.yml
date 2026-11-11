@@ -1,0 +1,53 @@
+name: Package tested Dropscotch diagnostic
+on:
+  workflow_dispatch:
+  push:
+    branches: [dropscotch-diagnostics]
+    paths: [".github/workflows/export-diagnostic-package.yml"]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download the passing build
+        uses: actions/download-artifact@v5
+        with:
+          name: DropscotchDiagnostics-Windows-x64
+          run-id: 43080332666
+          github-token: ${{ github.token }}
+          path: package
+      - name: Add pinned loader prerequisite
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path package/plugins -Force | Out-Null
+          Invoke-WebRequest -Uri 'https://github.com/leanleon93/BnsPlugin_DatafilePluginloader/releases/download/v1.5.1/DatafilePluginloader.dll' -OutFile package/plugins/DatafilePluginloader.dll
+          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath package/plugins/DatafilePluginloader.dll).Hash
+          if ($actual -ne '4C5D395FE04BD68D35897DA140C76ED1DCB6A56D86C78A1F00EDA11DC4D57497') { throw 'Loader release hash mismatch' }
+          Get-FileHash -Algorithm SHA256 package/datafilePlugins/DropscotchDiagnostics.dll,package/plugins/DatafilePluginloader.dll | Select-Object @{Name='File';Expression={Split-Path $_.Path -Leaf}},Hash | ConvertTo-Json | Set-Content package/manifest.json
+          'Loader v1.5.1 is included as a pinned prerequisite. Actual compatibility with the current game remains unverified; successful build tests cover the diagnostic DLL only.' | Set-Content package/LOADER_NOTE.txt
+      - name: Export verified package for installation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Compress-Archive -Path package/* -DestinationPath DropscotchDiagnostics-Install.zip
+          $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath DropscotchDiagnostics-Install.zip).Hash
+          Write-Output ('PACKAGE_SHA256=' + $digest)
+          # Text transfer supports restricted desktop sessions that cannot fetch
+          # signed download URLs. This contains only public plugin binaries.
+          $encoded = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path (Get-Location) 'DropscotchDiagnostics-Install.zip')))
+          Write-Output 'PACKAGE_BASE64_BEGIN'
+          for ($i = 0; $i -lt $encoded.Length; $i += 4000) {
+            Write-Output ($encoded.Substring($i, [Math]::Min(4000, $encoded.Length - $i)))
+          }
+          Write-Output 'PACKAGE_BASE64_END'
+      - name: Upload install package
+        uses: actions/upload-artifact@v4
+        with:
+          name: DropscotchDiagnostics-Install
+          path: DropscotchDiagnostics-Install.zip
+          if-no-files-found: error
+          retention-days: 14
