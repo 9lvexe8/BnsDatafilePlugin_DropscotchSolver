@@ -1,0 +1,36 @@
+name: Build Dropscotch diagnostic
+on:
+  workflow_dispatch:
+  push:
+    branches: [dropscotch-diagnostics]
+    paths: ["diagnostics/**", ".github/workflows/diagnostic-build.yml"]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Configure Windows x64
+        run: cmake -S diagnostics -B build-diagnostic -A x64
+      - name: Build
+        run: cmake --build build-diagnostic --config Release --parallel
+      - name: Exercise diagnostic without the game
+        run: ctest --test-dir build-diagnostic -C Release --output-on-failure
+      - name: Package diagnostic
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path package/datafilePlugins -Force | Out-Null
+          Copy-Item -LiteralPath build-diagnostic/Release/DropscotchDiagnostics.dll -Destination package/datafilePlugins/
+          Copy-Item -LiteralPath diagnostics/README.md -Destination package/README.md
+          Get-FileHash -Algorithm SHA256 package/datafilePlugins/DropscotchDiagnostics.dll | Format-List | Out-File package/SHA256.txt
+      - name: Upload tested DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: DropscotchDiagnostics-Windows-x64
+          path: package/
+          if-no-files-found: error
+          retention-days: 14
